@@ -9,10 +9,20 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 )
 
 func handleStorage(msgHandler *messages.MessageHandler, request *messages.StorageRequest) {
 	log.Println("Attempting to store", request.FileName)
+
+	dir := filepath.Dir(request.FileName)
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		msgHandler.SendResponse(false, err.Error())
+		msgHandler.Close()
+		return
+	}
+
 	file, err := os.OpenFile(request.FileName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
 	if err != nil {
 		msgHandler.SendResponse(false, err.Error())
@@ -33,9 +43,12 @@ func handleStorage(msgHandler *messages.MessageHandler, request *messages.Storag
 
 	if util.VerifyChecksum(serverCheck, clientCheck) {
 		log.Println("Successfully stored file.")
+		msgHandler.SendResponse(true, "Successfully stored file.")
 	} else {
 		log.Println("FAILED to store file. Invalid checksum.")
+		msgHandler.SendResponse(false, "FAILED to store file. Invalid checksum.")
 	}
+	msgHandler.Close()
 }
 
 func handleRetrieval(msgHandler *messages.MessageHandler, request *messages.RetrievalRequest) {
@@ -44,7 +57,10 @@ func handleRetrieval(msgHandler *messages.MessageHandler, request *messages.Retr
 	// Get file size and make sure it exists
 	info, err := os.Stat(request.FileName)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err.Error())
+		msgHandler.SendRetrievalResponse(false, "File not found", 0)
+		msgHandler.Close()
+		return
 	}
 
 	msgHandler.SendRetrievalResponse(true, "Ready to send", uint64(info.Size()))

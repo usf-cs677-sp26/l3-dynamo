@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -43,8 +44,12 @@ func put(msgHandler *messages.MessageHandler, fileName string) int {
 	return 0
 }
 
-func get(msgHandler *messages.MessageHandler, fileName string) int {
+func get(msgHandler *messages.MessageHandler, fileName string, dest string) int {
 	fmt.Println("GET", fileName)
+
+	if dest != "." {
+		fileName = filepath.Join(dest, fileName)
+	}
 
 	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
 	if err != nil {
@@ -55,6 +60,8 @@ func get(msgHandler *messages.MessageHandler, fileName string) int {
 	msgHandler.SendRetrievalRequest(fileName)
 	ok, _, size := msgHandler.ReceiveRetrievalResponse()
 	if !ok {
+		file.Close()
+		os.Remove(fileName)
 		return 1
 	}
 
@@ -100,8 +107,18 @@ func main() {
 
 	dir := "."
 	if len(os.Args) >= 5 {
-		dir = os.Args[4]
+		dir = strings.TrimLeft(os.Args[4], "/")
+		if dir == "" {
+			dir = "."
+		}
 	}
+
+	if dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Fatalln(err)
+		}
+	}
+
 	openDir, err := os.Open(dir)
 	if err != nil {
 		log.Fatalln(err)
@@ -111,6 +128,6 @@ func main() {
 	if action == "put" {
 		os.Exit(put(msgHandler, fileName))
 	} else if action == "get" {
-		os.Exit(get(msgHandler, fileName))
+		os.Exit(get(msgHandler, fileName, dir))
 	}
 }

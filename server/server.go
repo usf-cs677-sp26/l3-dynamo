@@ -49,9 +49,15 @@ func handleRetrieval(msgHandler *messages.MessageHandler, request *messages.Retr
 
 	msgHandler.SendRetrievalResponse(true, "Ready to send", uint64(info.Size()))
 
+	// The following block of code read the data from file, write it into w,
+	// and w ditributes the data to msgHandler and md5, repectively
+	// streaming, send file without loading the entire file into memory
 	file, _ := os.Open(request.FileName)
+	// md5 is a crypt hash func that converts input data of any size into a fixed-length 128-bit (16-byte) hash value
 	md5 := md5.New()
 	w := io.MultiWriter(msgHandler, md5)
+	// io.CopyN is responsible for the streaming loop; it repeatedly reads from the source and
+	// repeatedly calls Write on the destination (which ultimately calls msgHandler.Write).
 	io.CopyN(w, file, info.Size()) // Checksum and transfer file at same time
 	file.Close()
 

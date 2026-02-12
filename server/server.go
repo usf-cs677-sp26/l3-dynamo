@@ -9,12 +9,14 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
 func hasEnoughSpace(fileName string, required int64) (bool, error) {
+	dir := filepath.Dir(fileName)
 	var stat syscall.Statfs_t
-	err := syscall.Statfs(fileName, &stat)
+	err := syscall.Statfs(dir, &stat)
 	if err != nil {
 		return false, err
 	}
@@ -58,9 +60,13 @@ func handleStorage(msgHandler *messages.MessageHandler, request *messages.Storag
 	clientCheck := clientCheckMsg.GetChecksum().Checksum
 
 	if util.VerifyChecksum(serverCheck, clientCheck) {
-		log.Println("Successfully stored file.")
+		msg := "Successfully stored file."
+		log.Println(msg)
+		msgHandler.SendResponse(true, msg)
 	} else {
-		log.Println("FAILED to store file. Invalid checksum.")
+		msg := "FAILED to store file. Invalid checksum."
+		log.Println(msg)
+		msgHandler.SendResponse(false, msg)
 	}
 }
 

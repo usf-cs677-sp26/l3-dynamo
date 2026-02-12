@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -22,7 +23,8 @@ func put(msgHandler *messages.MessageHandler, fileName string) int {
 	}
 
 	// Tell the server we want to store this file
-	msgHandler.SendStorageRequest(fileName, uint64(info.Size()))
+	_, fname := filepath.Split(fileName)
+	msgHandler.SendStorageRequest(fname, uint64(info.Size()))
 	if ok, _ := msgHandler.ReceiveResponse(); !ok {
 		return 1
 	}
@@ -46,7 +48,10 @@ func put(msgHandler *messages.MessageHandler, fileName string) int {
 func get(msgHandler *messages.MessageHandler, fileName string) int {
 	fmt.Println("GET", fileName)
 
-	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
+	_, fname := filepath.Split(fileName)
+
+	// Create the file in write-only mode, but fail if it already exists
+	file, err := os.OpenFile(fname, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
 	if err != nil {
 		log.Println(err)
 		return 1
@@ -102,11 +107,9 @@ func main() {
 	if len(os.Args) >= 5 {
 		dir = os.Args[4]
 	}
-	openDir, err := os.Open(dir)
-	if err != nil {
+	if err := os.Chdir(dir); err != nil {
 		log.Fatalln(err)
 	}
-	openDir.Close()
 
 	if action == "put" {
 		os.Exit(put(msgHandler, fileName))

@@ -32,8 +32,19 @@ func put(msgHandler *messages.MessageHandler, fileName string) int {
 	file, _ := os.Open(fileName)
 	md5 := md5.New()
 	w := io.MultiWriter(msgHandler, md5)
-	io.CopyN(w, file, info.Size()) // Checksum and transfer file at same time
+
+	/* Proper error checking and handling is required, based on the same principle as in server. */
+	bytesRead, err := io.CopyN(w, file, info.Size()) // Checksum and transfer file at same time
 	file.Close()
+
+	if err != nil {
+		log.Printf("Error sending file data: %v", err)
+		return 1
+	}
+	if bytesRead != info.Size() {
+		log.Printf("Incomplete transfer: expected %d bytes, sent %d bytes", info.Size(), bytesRead)
+		return 1
+	}
 
 	checksum := md5.Sum(nil)
 	msgHandler.SendChecksumVerification(checksum)
@@ -65,8 +76,16 @@ func get(msgHandler *messages.MessageHandler, fileName string) int {
 
 	md5 := md5.New()
 	w := io.MultiWriter(file, md5)
-	io.CopyN(w, msgHandler, int64(size))
+	bytesWritten, err := io.CopyN(w, msgHandler, int64(size))
 	file.Close()
+	if err != nil {
+		log.Printf("Error receiving file data: %v", err)
+		return 1
+	}
+	if bytesWritten != int64(size) {
+		log.Printf("Incomplete transfer: expected %d bytes, stored %d bytes", size, bytesWritten)
+		return 1
+	}
 
 	clientCheck := md5.Sum(nil)
 	checkMsg, _ := msgHandler.Receive()

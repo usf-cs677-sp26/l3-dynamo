@@ -32,27 +32,50 @@ func handleStorage(msgHandler *messages.MessageHandler, request *messages.Storag
 	ok, err := hasEnoughSpace(request.FileName, int64(request.Size))
 	if err != nil {
 		msgHandler.SendResponse(false, err.Error())
-		msgHandler.Close()
 		return
 	}
 	if !ok {
 		msgHandler.SendResponse(false, "Not enough disk space on the server")
-		msgHandler.Close()
 		return
 	}
 
 	file, err := os.OpenFile(request.FileName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
 	if err != nil {
 		msgHandler.SendResponse(false, err.Error())
-		msgHandler.Close()
 		return
 	}
 
 	msgHandler.SendResponse(true, "Ready for data")
 	md5 := md5.New()
 	w := io.MultiWriter(file, md5)
-	io.CopyN(w, msgHandler, int64(request.Size)) /* Write and checksum as we go */
+
+	/* We need to handle the error and exit properly here. Otherwise, the server would then
+	   try to read a checksum message but instead read file data, causing unexpected errors.
+
+	   e.g., When trying to store a large file on orion machines, user quota limit will exit
+		the file bytes write early. Without error check and handling, the server doesn't know
+		about it and will keep receiving the checksum, and msgHandler.Receive() expects the
+		leading 8 bytes to be prefix that indicates the length, but it would be actually the
+		remaining file data, which could be a very large number, the massive payload allocation
+		at payload := make([]byte, payloadSize) will trigger the panic.
+	*/
+	bytesWritten, err := io.CopyN(w, msgHandler, int64(request.Size)) /* Write and checksum as we go */
 	file.Close()
+
+	if err != nil {
+		// Don't need to send error message b/c after the connection close, client won't receive it anyway ...
+		// msgHandler.SendResponse(false, fmt.Sprintf("Error receiving file data: %v", err))
+		log.Printf("Error receiving file data: %v", err)
+		msgHandler.Close()
+		return
+	}
+	if bytesWritten != int64(request.Size) {
+		// Don't need to send error message b/c after the connection close, client won't receive it anyway ...
+		// msgHandler.SendResponse(false, fmt.Sprintf("Incomplete transfer: expected %d bytes, got %d bytes", request.Size, bytesWritten))
+		log.Printf("Incomplete transfer: expected %d bytes, stored %d bytes", request.Size, bytesWritten)
+		msgHandler.Close()
+		return
+	}
 
 	serverCheck := md5.Sum(nil)
 
@@ -90,8 +113,19 @@ func handleRetrieval(msgHandler *messages.MessageHandler, request *messages.Retr
 	w := io.MultiWriter(msgHandler, md5)
 	// io.CopyN is responsible for the streaming loop; it repeatedly reads from the source and
 	// repeatedly calls Write on the destination (which ultimately calls msgHandler.Write).
-	io.CopyN(w, file, info.Size()) // Checksum and transfer file at same time
+	bytesRead, err := io.CopyN(w, file, info.Size()) // Checksum and transfer file at same time
 	file.Close()
+
+	if err != nil {
+		log.Printf("Error sending file data: %v", err)
+		msgHandler.Close()
+		return
+	}
+	if bytesRead != int64(info.Size()) {
+		log.Printf("Incomplete transfer: expected %d bytes, sent %d bytes", info.Size(), bytesRead)
+		msgHandler.Close()
+		return
+	}
 
 	checksum := md5.Sum(nil)
 	msgHandler.SendChecksumVerification(checksum)

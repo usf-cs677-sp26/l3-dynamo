@@ -10,7 +10,18 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 )
+
+func getFreeSpace(path string, need uint64) (bool, uint64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return false, 0, err
+	}
+
+	free := st.Bavail * uint64(st.Bsize)
+	return free >= need, free, nil
+}
 
 func handleStorage(msgHandler *messages.MessageHandler, request *messages.StorageRequest) {
 	log.Println("Attempting to store", request.FileName)
@@ -19,6 +30,18 @@ func handleStorage(msgHandler *messages.MessageHandler, request *messages.Storag
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		msgHandler.SendResponse(false, err.Error())
+		msgHandler.Close()
+		return
+	}
+
+	ok, free, err := getFreeSpace(dir, request.Size)
+	if err != nil {
+		msgHandler.SendResponse(false, "disk space check failed: "+err.Error())
+		msgHandler.Close()
+		return
+	}
+	if !ok {
+		msgHandler.SendResponse(false, fmt.Sprintf("insufficient disk space: need %d bytes, have %d bytes", request.Size, free))
 		msgHandler.Close()
 		return
 	}
